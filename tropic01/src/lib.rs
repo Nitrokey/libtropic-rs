@@ -11,12 +11,13 @@ use nom::Needed;
 use nom_derive::Parse;
 use packed_struct::PackingError;
 use packed_struct::derive::PackedStruct;
-use x25519_dalek::PublicKey;
-use x25519_dalek::StaticSecret;
 use zerocopy::IntoBytes;
 use zeroize::Zeroize;
 
 pub use crate::crypto::CryptoError;
+pub use crate::crypto::X25519;
+#[cfg(feature = "x25519-dalek")]
+pub use crate::crypto::X25519Dalek;
 pub use crate::lt_2::ResponseStatus;
 pub use crate::lt_2::SleepReq;
 pub use crate::lt_2::StartupReq;
@@ -105,10 +106,6 @@ impl<SPI: SpiDevice, CS: OutputPin> Tropic01<SPI, CS> {
             cs: Some(cs),
             session: self.session,
         })
-    }
-
-    fn set_session(&mut self, session: Option<Session>) {
-        self.session = session;
     }
 }
 
@@ -236,6 +233,16 @@ where
         Error<<SPI as SpiErrorType>::Error, <CS as embedded_hal::digital::ErrorType>::Error>;
 }
 
+/// 256-bit key
+#[derive(Zeroize)]
+struct Aes256GcmKey([u8; 32]);
+
+impl AsRef<[u8]> for Aes256GcmKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// 96-bit nonce
 #[derive(Default, Zeroize)]
 struct Nonce(u128);
@@ -261,12 +268,12 @@ impl AsRef<[u8]> for Nonce {
 #[derive(Zeroize)]
 struct Session {
     iv: Nonce,
-    encrypt: PublicKey,
-    decrypt: StaticSecret,
+    encrypt: Aes256GcmKey,
+    decrypt: Aes256GcmKey,
 }
 
 impl Session {
-    fn new(encrypt: PublicKey, decrypt: StaticSecret) -> Self {
+    fn new(encrypt: Aes256GcmKey, decrypt: Aes256GcmKey) -> Self {
         Self {
             iv: Nonce::default(),
             encrypt,

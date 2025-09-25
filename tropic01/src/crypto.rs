@@ -7,13 +7,43 @@ use hmac::Hmac;
 use hmac::Mac;
 use sha2::Digest;
 use sha2::Sha256;
-use x25519_dalek::PublicKey;
-use x25519_dalek::StaticSecret;
 
+use crate::Aes256GcmKey;
 use crate::L3_FRAME_MAX_SIZE;
 use crate::Nonce;
 
 type HmacSha256 = Hmac<Sha256>;
+
+pub trait X25519 {
+    type PublicKey: AsRef<[u8]> + Copy + From<[u8; 32]>;
+    type StaticSecret;
+    type SharedSecret: AsRef<[u8]>;
+
+    fn diffie_hellman(
+        &self,
+        private_key: &Self::StaticSecret,
+        public_key: &Self::PublicKey,
+    ) -> Self::SharedSecret;
+}
+
+#[cfg(feature = "x25519-dalek")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct X25519Dalek;
+
+#[cfg(feature = "x25519-dalek")]
+impl X25519 for X25519Dalek {
+    type PublicKey = x25519_dalek::PublicKey;
+    type StaticSecret = x25519_dalek::StaticSecret;
+    type SharedSecret = x25519_dalek::SharedSecret;
+
+    fn diffie_hellman(
+        &self,
+        private_key: &Self::StaticSecret,
+        public_key: &Self::PublicKey,
+    ) -> Self::SharedSecret {
+        private_key.diffie_hellman(public_key)
+    }
+}
 
 /// Represents all errors that can happen during encryption and decryption of L3
 /// commands and results.
@@ -111,13 +141,13 @@ pub(super) fn sha256_sequence(
 }
 
 pub(super) fn aesgcm_encrypt(
-    key: PublicKey,
+    key: &Aes256GcmKey,
     nonce: &Nonce,
     aad: &[u8],
     buf: &mut ArrayVec<u8, L3_FRAME_MAX_SIZE>,
 ) -> Result<[u8; 16], CryptoError> {
     let nonce = nonce.as_ref().into();
-    let key = Key::<Aes256Gcm>::from_slice(key.as_bytes());
+    let key = Key::<Aes256Gcm>::from_slice(key.as_ref());
     let mut cipher = Aes256Gcm::new(key);
 
     let tag = cipher
@@ -127,14 +157,14 @@ pub(super) fn aesgcm_encrypt(
 }
 
 pub(super) fn aesgcm_decrypt(
-    key: &StaticSecret,
+    key: &Aes256GcmKey,
     nonce: &Nonce,
     aad: &[u8],
     tag: &[u8],
     buf: &mut [u8],
 ) -> Result<(), CryptoError> {
     let nonce = nonce.as_ref().into();
-    let key = Key::<Aes256Gcm>::from_slice(key.as_bytes());
+    let key = Key::<Aes256Gcm>::from_slice(key.as_ref());
     let mut cipher = Aes256Gcm::new(key);
     let tag = tag.into();
     cipher
